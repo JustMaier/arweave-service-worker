@@ -51,7 +51,7 @@ export async function getUserAddress(userAlias){
           expr1: {
               op: 'equals',
               expr1: 'Alias',
-              expr2: 'justmaier'
+              expr2: userAlias
           },
           expr2: {
               op: 'equals',
