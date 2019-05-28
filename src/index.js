@@ -2,11 +2,16 @@ navigator.serviceWorker.getRegistration().then(registration => {
   if (!registration || !navigator.serviceWorker.controller) {
     navigator.serviceWorker.register('/worker.js').then(function() {
       console.log('Service worker registered, reloading the page');
-      document.body.classList.add('registered');
       window.location.reload();
     });
   } else {
     document.body.classList.add('registered');
-    console.log('DEBUG: client is under the control of service worker');
   }
 });
+
+window.unregister = async function(){
+  const registration = await navigator.serviceWorker.getRegistration();
+  await registration.unregister();
+  document.body.classList.remove('registered');
+  document.body.classList.add('unregistered');
+}

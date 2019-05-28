@@ -1,21 +1,8 @@
 import B64js from 'base64-js';
+import {xxHash32} from 'js-xxhash';
+import ArweaveCache from './arweave-cache';
 
-const gateway = 'https://arweave.net';
-export function arQL(query){
-  return fetch(gateway+'/arql',{
-    method: 'post',
-    body: JSON.stringify(query)
-  }).then(x=>x.json())
-}
-
-export function getTransaction(id){
-  return fetch(gateway+'/tx/'+id).then(x=>x.json());
-}
-
-export function get(id, init){
-  return fetch(gateway+'/'+id, init);
-}
-
+// Helpers
 function b64UrlEncode(b64UrlString) {
   return b64UrlString
     .replace(/\+/g, "-")
@@ -38,75 +25,136 @@ async function ownerToAddress(owner){
   return b64UrlEncode(B64js.fromByteArray(new Uint8Array(digest)));
 }
 
-export async function getUserAddress(userAlias){
-  const txs = await arQL({
+const hashTextEncoder = new TextEncoder();
+function hash(string){
+  return xxHash32(hashTextEncoder.encode(string), 0).toString(16);
+}
+
+export default class ArweaveShim{
+  constructor(caches, {gateway, cacheDuration} = {gateway: 'https://arweave.net', cacheDuration: 15}){
+    this.db = new ArweaveCache();
+    this.caches = caches;
+
+    this.gateway = gateway;
+    this.options = {cacheDuration};
+  }
+
+  async arQL(query){
+    // If the cache is fresh, use it...
+    const queryHash = hash(JSON.stringify(query).toLowerCase());
+    const cachedResult = await this.db.queryResults.where({queryHash}).first();
+    const now = new Date().getTime();
+    if(cachedResult && cachedResult.time > (now - this.options.cacheDuration*60*1000)) return cachedResult.result;
+
+    // Otherwise fetch the latest version...
+    const result = await fetch(this.gateway+'/arql',{
+      method: 'post',
+      body: JSON.stringify(query)
+    }).then(x=>x.json());
+    this.db.queryResults.put({queryHash, result, time: new Date().getTime()});
+    return result;
+  }
+
+  async getTransaction(id){
+    const queryHash = id;
+    const cachedResult = await this.db.queryResults.where({queryHash}).first();
+    if (cachedResult) return cachedResult.result;
+
+    try{
+      const fetchedResult = await fetch(this.gateway+'/tx/'+id).then(x=>x.json());
+      if(!fetchedResult) return null;
+      this.db.queryResults.put({queryHash, result: {owner: fetchedResult.owner, tags: fetchedResult.tags}});
+      return fetchedResult;
+    } catch {
+      return null;
+    }
+  }
+
+  async get(id, init){
+    const req = new Request(this.gateway+'/'+id, init);
+    const res = await this.caches.match(req);
+    if (res) return res;
+
+    const fetchedRes = await fetch(req);
+    const cacheableRes = fetchedRes.clone();
+    caches.open('v1').then(cache=>cache.put(req, cacheableRes));
+    return fetchedRes;
+  }
+
+  async getUserAddress(alias){
+    const cachedAlias = await this.db.aliases.where({alias}).first();
+    if(cachedAlias) return cachedAlias.address;
+
+    const txs = await this.arQL({
+        op: 'and',
+        expr1: {
+            op: 'equals',
+            expr1: 'App-Name',
+            expr2: 'arweave-id'
+        },
+        expr2: {
+            op: 'and',
+            expr1: {
+                op: 'equals',
+                expr1: 'Alias',
+                expr2: alias
+            },
+            expr2: {
+                op: 'equals',
+                expr1: 'Type',
+                expr2: 'name'
+            }
+        }
+    });
+
+    if(!txs || txs.length === 0)
+      throw new Error('User alias not found');
+
+    const tx = await this.getTransaction(txs[txs.length - 1]);
+    const address = await ownerToAddress(tx.owner);
+    this.db.aliases.put({alias, address, txId: tx.id});
+    return address;
+  }
+
+  getTransactionsFor(address, service = 'me', path = 'index.html', version = null){
+    const query = {
       op: 'and',
       expr1: {
           op: 'equals',
-          expr1: 'App-Name',
-          expr2: 'arweave-id'
+          expr1: 'service',
+          expr2: service
       },
       expr2: {
           op: 'and',
           expr1: {
               op: 'equals',
-              expr1: 'Alias',
-              expr2: userAlias
+              expr1: 'from',
+              expr2: address
           },
           expr2: {
-              op: 'equals',
-              expr1: 'Type',
-              expr2: 'name'
+            op: 'equals',
+            expr1: 'path',
+            expr2: path
           }
       }
-  });
+    };
 
-  if(!txs || txs.length === 0)
-    throw new Error('User alias not found');
-
-  const tx = await getTransaction(txs[txs.length - 1]);
-  const address = await ownerToAddress(tx.owner);
-  return address;
-}
-
-export function getTransactionsFor(address, service = 'me', path = 'index.html', version = null){
-  const query = {
-    op: 'and',
-    expr1: {
-        op: 'equals',
-        expr1: 'service',
-        expr2: service
-    },
-    expr2: {
+    if(version){
+      query.expr2.expr2 = {
         op: 'and',
         expr1: {
-            op: 'equals',
-            expr1: 'from',
-            expr2: address
-        },
-        expr2: {
           op: 'equals',
           expr1: 'path',
           expr2: path
+        },
+        expr2: {
+          op: 'equals',
+          expr1: 'version',
+          expr2: version
         }
-    }
-  };
-
-  if(version){
-    query.expr2.expr2 = {
-      op: 'and',
-      expr1: {
-        op: 'equals',
-        expr1: 'path',
-        expr2: path
-      },
-      expr2: {
-        op: 'equals',
-        expr1: 'version',
-        expr2: version
       }
     }
-  }
 
-  return arQL(query);
+    return this.arQL(query);
+  }
 }
