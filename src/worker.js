@@ -1,6 +1,6 @@
 import ArweaveShim from './arweave-shim';
 const arweaveShim = new ArweaveShim(self.caches);
-const urlRegex = /\/\@([\w\-]+)\/?\@?([\w\-]*)\/?([\w\-\/\.]*)@?(.+)?$/;
+const urlRegex = /\/\@([\w\-]+)\/?(?:\@([\w\-]+))?\/?([\w\-\/\.]+)?@?(.+)?$/;
 
 async function emit(event, type, payload){
   const client = await clients.get(event.clientId);
