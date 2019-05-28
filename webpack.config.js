@@ -19,11 +19,6 @@ config.dev = {
   devServer: {
     contentBase: './public',
     port: 1227,
-    before: (app, server) => {
-      app.get(/^\/@.*\..+/, (req, res) => {
-        res.redirect('/?redirect='+req.path)
-      })
-    },
     historyApiFallback: {
       rewrites: [
         {from: /^\/@.*\..+/, to: '/index.html'}

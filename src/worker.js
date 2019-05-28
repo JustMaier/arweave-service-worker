@@ -3,7 +3,7 @@ const urlRegex = /\/\@([\w\-]+)\/?\@?([\w\-]*)\/?([\w\-\/\.]*)@?(.+)?$/;
 
 async function emit(event, type, payload){
   const client = await clients.get(event.clientId);
-  client.postMessage({type, payload});
+  client.postMessage(JSON.stringify({type, payload}));
 }
 
 async function fetchFromArweave(event, [fullPath, user, service, path, version]){
@@ -27,7 +27,7 @@ self.addEventListener('fetch', event => {
     const path = event.request.url.replace(self.location.origin,'');
     const match = urlRegex.exec(path);
     if(match) event.respondWith(fetchFromArweave(event, match));
+  } else {
+    event.respondWith(fetch(event.request));
   }
-
-  event.respondWith(fetch(event.request));
 });
