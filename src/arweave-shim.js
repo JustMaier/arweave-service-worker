@@ -30,6 +30,16 @@ function hash(string){
   return xxHash32(hashTextEncoder.encode(string), 0).toString(16);
 }
 
+const mimetypes = {
+  'html': 'text/html',
+  'css': 'text/css',
+  'js': 'text/javascript',
+  'json': 'application/json',
+  'jpg': 'image/jpeg',
+  'png': 'image/png',
+  'svg': 'image/svg+xml'
+}
+
 export default class ArweaveShim{
   constructor(caches, {gateway, cacheDuration} = {gateway: 'https://arweave.net', cacheDuration: 15}){
     this.db = new ArweaveCache();
@@ -70,15 +80,21 @@ export default class ArweaveShim{
     }
   }
 
-  async get(id, init){
-    const req = new Request(this.gateway+'/'+id, init);
+  getMimeType(path) {
+    const ext = path.substr(path.lastIndexOf('.') + 1);
+    return mimetypes[ext] || 'text/plain';
+  }
+
+  async get(id, path){
+    const req = new Request(this.gateway+'/'+id);
     const res = await this.caches.match(req);
     if (res) return res;
 
     const fetchedRes = await fetch(req);
-    const cacheableRes = fetchedRes.clone();
+    const typedRes = new Response(await fetchedRes.blob(), { status: fetchedRes.status, statusText: fetchedRes.statusText, headers: { 'content-type': this.getMimeType(path) } })
+    const cacheableRes = typedRes.clone();
     caches.open('v1').then(cache=>cache.put(req, cacheableRes));
-    return fetchedRes;
+    return typedRes;
   }
 
   async getUserAddress(alias){
@@ -110,7 +126,7 @@ export default class ArweaveShim{
     if(!txs || txs.length === 0)
       throw new Error('User alias not found');
 
-    const tx = await this.getTransaction(txs[txs.length - 1]);
+    const tx = await this.getTransaction(txs[0]);
     const address = await ownerToAddress(tx.owner);
     this.db.aliases.put({alias, address, txId: tx.id});
     return address;
